@@ -1,4 +1,7 @@
 const dns = require("dns");
+const { promisify } = require("util");
+const dnsResolve = promisify(dns.resolve4);
+const dnsLookup = promisify(dns.lookup);
 
 const testHost = process.env.TEST_HOST;
 const countDefault = 10;
@@ -15,21 +18,42 @@ if (count === NaN) {
 
 console.log(`Testing DNS res for ${testHost} ${count} times.`);
 
-for (let counter = count; counter > 0; counter--) {
-    const resolveTimerLabel = `${testHost}-${counter} resolves`;
-    const lookupTimerLabel = `${testHost}-${counter} lookup`;
+async function loopResolve(resolveRetry) {
+    const resolveTimerLabel = `${testHost}-${resolveRetry} resolves`;
     console.time(resolveTimerLabel);
-    console.time(lookupTimerLabel);
-    dns.resolve4(testHost, function (err, res) {
-        if (err) {
-            console.log(`There was an error resolving ${testHost}:`, err)
-        }
+    return dnsResolve(testHost).then(async (res) => {
+        console.log(`Resolved ${testHost} to`, res);
         console.timeEnd(resolveTimerLabel);
-    });
-    dns.lookup(testHost, function (err, res) {
-        if (err) {
-            console.log(`There was an error lookingup ${testHost}:`, err)
+        if (resolveRetry > 0) {
+            await loopResolve(resolveRetry - 1);
+            return
         }
-        console.timeEnd(lookupTimerLabel);
+    }).catch((err) => {
+        console.log(`There was an error resolving ${testHost}:`, err);
     });
+}
+
+async function loopLookup(lookupRetry) {
+    const lookupTimerLabel = `${testHost}-${lookupRetry} lookups`;
+    console.time(lookupTimerLabel);
+    return dnsLookup(testHost).then(async (res) => {
+        console.log(`Lookupd ${testHost} to`, res);
+        console.timeEnd(lookupTimerLabel);
+        if (lookupRetry > 0) {
+            await loopLookup(lookupRetry - 1);
+            return
+        }
+    }).catch(err => {
+        console.log(`There was an error resolving ${testHost}:`, err)
+    });
+}
+
+const mode = process.env.MODE;
+
+if (mode === "resolve" || mode === undefined) {
+    loopResolve(count);
+} else if (mode === "lookup") {
+    loopLookup(count);
+} else {
+    console.log(`MODE "${mode}" unsupported.`)
 }
